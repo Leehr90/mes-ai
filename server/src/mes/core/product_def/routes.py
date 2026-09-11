@@ -46,6 +46,9 @@ from .schemas import (
     StepParameterCreate,
     StepParameterRead,
     StepParameterUpdate,
+    ParameterValueBatchRequest,
+    ParameterValueRead,
+    ParameterValueRecord,
     RouteProductAssignmentCreate,
     RouteProductAssignmentRead,
     RouteMaterialAssignmentCreate,
@@ -628,6 +631,57 @@ async def delete_step_parameter(
     """Delete a step parameter."""
     await svc.delete_step_parameter(session, param_id)
     await session.commit()
+
+
+# ─── Segment Parameter Values (per-WIP recorded actuals) ─────────────
+
+
+@router.post("/segment-parameter-values", status_code=201)
+async def record_parameter_value(
+    body: ParameterValueRecord,
+    session: AsyncSession = Depends(get_db_session),
+    _user: User = Depends(require_permission("product_def.update")),
+):
+    """Record (upsert) a single step-parameter actual value for a WIP unit/lot."""
+    value = await svc.record_parameter_value(session, **body.model_dump())
+    await session.commit()
+    return success_response(ParameterValueRead.model_validate(value).model_dump())
+
+
+@router.post("/segment-parameter-values/batch", status_code=201)
+async def record_parameter_values_batch(
+    body: ParameterValueBatchRequest,
+    session: AsyncSession = Depends(get_db_session),
+    _user: User = Depends(require_permission("product_def.update")),
+):
+    """Record (upsert) multiple step-parameter actual values in a single call."""
+    items = [item.model_dump() for item in body.items]
+    values = await svc.record_parameter_values_batch(session, items)
+    await session.commit()
+    return success_response(
+        [ParameterValueRead.model_validate(v).model_dump() for v in values],
+    )
+
+
+@router.get("/segment-parameter-values")
+async def list_parameter_values(
+    parameter_id: UUID | None = Query(None, description="Filter by parameter"),
+    unit_id: UUID | None = Query(None, description="Filter by unit"),
+    lot_id: UUID | None = Query(None, description="Filter by lot"),
+    params: PaginationParams = Depends(get_pagination_params),
+    session: AsyncSession = Depends(get_db_session),
+    _user: User = Depends(require_permission("product_def.read")),
+):
+    """Query recorded step-parameter actual values with optional filters."""
+    items, cursor, has_more = await svc.list_parameter_values(
+        session, params, parameter_id=parameter_id, unit_id=unit_id, lot_id=lot_id,
+    )
+    return list_response(
+        [ParameterValueRead.model_validate(v).model_dump() for v in items],
+        cursor=cursor,
+        limit=params.limit,
+        has_more=has_more,
+    )
 
 
 # ─── Standalone Routes (Route Editor) ────────────────────────────────

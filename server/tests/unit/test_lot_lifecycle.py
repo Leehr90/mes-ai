@@ -513,6 +513,7 @@ class TestOrderLifecycle:
         result = await OperationsRequestService.increment_completed(session, order.id, qty=100)
 
         assert order.quantity_completed == 100
+        mock_get.assert_awaited_once_with(session, order.id, include_inactive=True)
 
     @pytest.mark.asyncio
     @patch("mes.core.operations.service.OperationsRequestService.get_order", new_callable=AsyncMock)
@@ -537,6 +538,7 @@ class TestOrderLifecycle:
         await OperationsRequestService.increment_scrapped(session, order.id, qty=5)
 
         assert order.quantity_scrapped == 5
+        mock_get.assert_awaited_once_with(session, order.id, include_inactive=True)
 
     @pytest.mark.asyncio
     @patch("mes.core.operations.service.event_bus.publish", new_callable=AsyncMock)

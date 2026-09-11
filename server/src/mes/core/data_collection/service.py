@@ -1,8 +1,9 @@
 """
 DATA-COLLECT: Business logic service for data collection.
 
-Provides CRUD for data definitions, data-point collection (single and batch),
-value validation against definition type/limits, and query operations.
+Provides CRUD for data definitions, data-point collection (single and batch,
+with optional upsert of the current value per definition/WIP), value
+validation against definition type/limits, and query operations.
 """
 
 from __future__ import annotations
@@ -220,6 +221,31 @@ class DataPointService:
     # ─── Collection ──────────────────────────────────────────────────
 
     @staticmethod
+    async def _find_current_point(
+        session: AsyncSession,
+        defn: DataDefinition,
+        *,
+        unit_id: UUID | None,
+        lot_id: UUID | None,
+    ) -> DataPoint | None:
+        """Return the latest active data point for (definition, unit/lot)."""
+        stmt = (
+            select(DataPoint)
+            .where(
+                DataPoint.definition_id == defn.id,
+                DataPoint.is_active.is_(True),
+            )
+            .order_by(DataPoint.collected_at.desc())
+            .limit(1)
+        )
+        if unit_id is not None:
+            stmt = stmt.where(DataPoint.unit_id == unit_id)
+        else:
+            stmt = stmt.where(DataPoint.lot_id == lot_id)
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    @staticmethod
     async def collect(
         session: AsyncSession,
         defn: DataDefinition,
@@ -231,12 +257,18 @@ class DataPointService:
         value_boolean: bool | None = None,
         source_equipment_id: UUID | None = None,
         operator_id: UUID | None = None,
+        upsert: bool = False,
     ) -> DataPoint:
         """
         Collect a single data point.
 
         Validates the value against the definition, creates the record,
         and publishes a data.collected event.
+
+        When `upsert` is true, the current data point for this
+        (definition, unit/lot) — if one exists — is updated in place
+        instead of appending a new record. Upsert requires a WIP
+        reference (unit_id or lot_id).
         """
         DataPointService._validate_value(
             defn,
@@ -245,20 +277,43 @@ class DataPointService:
             value_boolean=value_boolean,
         )
 
+        if upsert and unit_id is None and lot_id is None:
+            raise InvalidDataValueException(
+                defn.code, defn.data_type,
+                "upsert requires unit_id or lot_id",
+            )
+
         now = datetime.now(timezone.utc)
-        point = DataPoint(
-            definition_id=defn.id,
-            unit_id=unit_id,
-            lot_id=lot_id,
-            value_numeric=value_numeric,
-            value_string=value_string,
-            value_boolean=value_boolean,
-            collected_at=now,
-            collected_at_utc=now.replace(tzinfo=None),
-            source_equipment_id=source_equipment_id,
-            operator_id=operator_id,
-        )
-        session.add(point)
+        point: DataPoint | None = None
+        if upsert:
+            point = await DataPointService._find_current_point(
+                session, defn, unit_id=unit_id, lot_id=lot_id,
+            )
+
+        updated = point is not None
+        if point is not None:
+            # Upsert: update the existing record in place
+            point.value_numeric = value_numeric
+            point.value_string = value_string
+            point.value_boolean = value_boolean
+            point.collected_at = now
+            point.collected_at_utc = now.replace(tzinfo=None)
+            point.source_equipment_id = source_equipment_id
+            point.operator_id = operator_id
+        else:
+            point = DataPoint(
+                definition_id=defn.id,
+                unit_id=unit_id,
+                lot_id=lot_id,
+                value_numeric=value_numeric,
+                value_string=value_string,
+                value_boolean=value_boolean,
+                collected_at=now,
+                collected_at_utc=now.replace(tzinfo=None),
+                source_equipment_id=source_equipment_id,
+                operator_id=operator_id,
+            )
+            session.add(point)
         await session.flush()
 
         # Determine the "value" for the event
@@ -273,7 +328,8 @@ class DataPointService:
             )
         )
         logger.info(
-            "Collected data point %s for definition %s (%s)",
+            "%s data point %s for definition %s (%s)",
+            "Updated" if updated else "Collected",
             point.id, defn.id, defn.code,
         )
         return point
@@ -287,7 +343,9 @@ class DataPointService:
         Collect multiple data points in a single call.
 
         Each item dict must contain definition_id plus the value fields.
-        Definitions are fetched once and reused.
+        Definitions are fetched once and reused. An item may set
+        ``upsert: true`` to update the current value for its
+        (definition, unit/lot) instead of appending a new record.
         """
         # Pre-fetch all referenced definitions
         definition_ids = {item["definition_id"] for item in items}
@@ -321,6 +379,7 @@ class DataPointService:
                 value_boolean=item.get("value_boolean"),
                 source_equipment_id=item.get("source_equipment_id"),
                 operator_id=item.get("operator_id"),
+                upsert=item.get("upsert", False),
             )
             points.append(point)
 

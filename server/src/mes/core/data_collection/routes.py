@@ -133,7 +133,11 @@ async def collect_data_point(
     session: AsyncSession = Depends(get_db_session),
     _user: User = Depends(require_permission("data.collect")),
 ):
-    """Collect a single data point."""
+    """Collect a single data point.
+
+    Set ``upsert: true`` to update the current value for this
+    (definition, unit/lot) instead of appending a new record.
+    """
     defn = await defn_svc.get_definition(session, body.definition_id)
     point = await point_svc.collect(
         session,
@@ -156,7 +160,11 @@ async def collect_batch(
     session: AsyncSession = Depends(get_db_session),
     _user: User = Depends(require_permission("data.collect")),
 ):
-    """Collect multiple data points in a single call."""
+    """Collect multiple data points in a single call.
+
+    Each item may set ``upsert: true`` to update the current value for its
+    (definition, unit/lot) instead of appending a new record.
+    """
     items = [item.model_dump() for item in body.items]
     points = await point_svc.collect_batch(session, items)
     await session.commit()

@@ -141,6 +141,13 @@ class CollectRequest(BaseModel):
     value_boolean: bool | None = None
     source_equipment_id: UUID | None = None
     operator_id: UUID | None = None
+    upsert: bool = Field(
+        False,
+        description=(
+            "If true, update the current data point for this "
+            "(definition, unit/lot) instead of appending a new record"
+        ),
+    )
 
 
 class CollectBatchRequest(BaseModel):

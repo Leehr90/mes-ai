@@ -29,6 +29,7 @@ from mes.core.product_def.models import (
     SegmentEquipmentRequirement,
     SegmentMaterialRequirement,
     SegmentParameter,
+    SegmentParameterValue,
     ProcessSegmentInputDisposition,
     ProcessSegmentOutputDisposition,
 )
@@ -49,6 +50,9 @@ from mes.core.product_def.schemas import (
     RouteUpdate,
     StepParameterCreate,
     StepParameterRead,
+    ParameterValueBatchRequest,
+    ParameterValueRead,
+    ParameterValueRecord,
     RouteProductAssignmentCreate,
     RouteProductAssignmentRead,
     RouteMaterialAssignmentCreate,
@@ -457,6 +461,132 @@ class TestRouteStepERPFields:
         )
         assert schema.name == "Temperature"
         assert schema.uom_id is not None
+
+
+# ─── SegmentParameterValue (per-WIP recorded actuals) ────────────────
+
+
+class TestParameterValueSchemas:
+    def test_record_numeric(self):
+        s = ParameterValueRecord(
+            parameter_id=uuid.uuid4(),
+            unit_id=uuid.uuid4(),
+            value_numeric=42.5,
+        )
+        assert s.value_numeric == 42.5
+        assert s.value_string is None
+        assert s.lot_id is None
+
+    def test_record_lot_based(self):
+        lid = uuid.uuid4()
+        s = ParameterValueRecord(
+            parameter_id=uuid.uuid4(),
+            lot_id=lid,
+            value_string="OK",
+        )
+        assert s.lot_id == lid
+        assert s.unit_id is None
+
+    def test_record_boolean(self):
+        s = ParameterValueRecord(
+            parameter_id=uuid.uuid4(),
+            unit_id=uuid.uuid4(),
+            value_boolean=True,
+        )
+        assert s.value_boolean is True
+
+    def test_batch_requires_items(self):
+        with pytest.raises(Exception):
+            ParameterValueBatchRequest(items=[])
+
+    def test_batch_multi_item(self):
+        items = [
+            ParameterValueRecord(
+                parameter_id=uuid.uuid4(),
+                unit_id=uuid.uuid4(),
+                value_numeric=float(i),
+            )
+            for i in range(3)
+        ]
+        s = ParameterValueBatchRequest(items=items)
+        assert len(s.items) == 3
+
+    def test_value_read_from_attributes(self):
+        now = datetime.now(timezone.utc)
+        obj = SegmentParameterValue(
+            parameter_id=uuid.uuid4(),
+            unit_id=uuid.uuid4(),
+            value_numeric=10.0,
+        )
+        obj.id = uuid.uuid4()
+        obj.is_active = True
+        obj.created_at = now
+        obj.updated_at = now
+        schema = ParameterValueRead.model_validate(obj)
+        assert schema.value_numeric == 10.0
+        assert schema.value_string is None
+
+
+class TestSegmentParameterValueModel:
+    def test_tablename(self):
+        assert SegmentParameterValue.__tablename__ == "segment_parameter_values"
+
+    def test_columns_present(self):
+        cols = {c.key for c in SegmentParameterValue.__mapper__.columns}
+        for col in (
+            "parameter_id", "unit_id", "lot_id",
+            "value_numeric", "value_string", "value_boolean",
+            "is_active", "created_at", "updated_at",
+        ):
+            assert col in cols
+
+    def test_parameter_relationship(self):
+        assert "parameter" in SegmentParameterValue.__mapper__.relationships
+
+
+class TestParameterValueValidation:
+    """Service._validate_parameter_value without a database."""
+
+    def _param(self, data_type: str):
+        from unittest.mock import MagicMock
+        p = MagicMock()
+        p.data_type = data_type
+        p.name = "P"
+        return p
+
+    def test_numeric_ok(self):
+        from mes.core.product_def.service import ProductDefService
+        ProductDefService._validate_parameter_value(
+            self._param("numeric"), value_numeric=1.0,
+            value_string=None, value_boolean=None,
+        )
+
+    def test_numeric_missing(self):
+        from mes.core.product_def.service import ProductDefService
+        from mes.core.product_def.exceptions import InvalidParameterValueException
+        with pytest.raises(InvalidParameterValueException):
+            ProductDefService._validate_parameter_value(
+                self._param("numeric"), value_numeric=None,
+                value_string=None, value_boolean=None,
+            )
+
+    def test_boolean_missing(self):
+        from mes.core.product_def.service import ProductDefService
+        from mes.core.product_def.exceptions import InvalidParameterValueException
+        with pytest.raises(InvalidParameterValueException):
+            ProductDefService._validate_parameter_value(
+                self._param("boolean"), value_numeric=None,
+                value_string=None, value_boolean=None,
+            )
+
+    def test_string_missing(self):
+        from mes.core.product_def.service import ProductDefService
+        from mes.core.product_def.exceptions import InvalidParameterValueException
+        with pytest.raises(InvalidParameterValueException):
+            ProductDefService._validate_parameter_value(
+                self._param("string"), value_numeric=None,
+                value_string=None, value_boolean=None,
+            )
 
 
 # ─── Event tests ─────────────────────────────────────────────────────

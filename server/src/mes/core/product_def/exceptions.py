@@ -29,3 +29,23 @@ class DuplicateDispositionCodeException(MESException):
             message=f"Disposition with code '{code}' already exists",
             details={"code": code},
         )
+
+
+class InvalidParameterValueException(MESException):
+    """Raised when a recorded step-parameter value is invalid for the parameter."""
+
+    status_code = 422
+    error_code = "INVALID_PARAMETER_VALUE"
+
+    def __init__(self, name: str, data_type: str, detail: str) -> None:
+        super().__init__(
+            message=(
+                f"Invalid value for step parameter '{name}' "
+                f"(type {data_type}): {detail}"
+            ),
+            details={
+                "parameter_name": name,
+                "data_type": data_type,
+                "detail": detail,
+            },
+        )

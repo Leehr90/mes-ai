@@ -52,12 +52,15 @@ class OperationsRequestService:
         return await paginate_query(session, stmt, OperationsRequest, params)
 
     @staticmethod
-    async def get_order(session: AsyncSession, order_id: UUID) -> OperationsRequest:
+    async def get_order(
+        session: AsyncSession, order_id: UUID, include_inactive: bool = False,
+    ) -> OperationsRequest:
         """Get a production order by ID. Raises NotFoundException if missing."""
         stmt = select(OperationsRequest).where(
-            OperationsRequest.id == order_id,
-            OperationsRequest.is_active.is_(True),
+            OperationsRequest.id == order_id
         )
+        if not include_inactive:
+            stmt = stmt.where(OperationsRequest.is_active.is_(True))
         result = await session.execute(stmt)
         order = result.scalar_one_or_none()
         if order is None:
@@ -222,7 +225,9 @@ class OperationsRequestService:
         session: AsyncSession, order_id: UUID, qty: int = 1,
     ) -> OperationsRequest:
         """Increment quantity_completed. Called when a unit/lot finishes final step."""
-        order = await OperationsRequestService.get_order(session, order_id)
+        order = await OperationsRequestService.get_order(
+            session, order_id, include_inactive=True,
+        )
         order.quantity_completed += qty
         await session.flush()
         return order
@@ -232,7 +237,9 @@ class OperationsRequestService:
         session: AsyncSession, order_id: UUID, qty: int = 1,
     ) -> OperationsRequest:
         """Increment quantity_scrapped. Called when a unit/lot is scrapped."""
-        order = await OperationsRequestService.get_order(session, order_id)
+        order = await OperationsRequestService.get_order(
+            session, order_id, include_inactive=True,
+        )
         order.quantity_scrapped += qty
         await session.flush()
         return order

@@ -25,6 +25,7 @@ CLIENT=""
 PORT=0
 SERVER_URL=""
 DO_BUILD=0
+TRACKING=\
 
 # ---------------------------------------------------------------------------
 # Help
@@ -41,11 +42,14 @@ ARGUMENTS
                                      rt-client       Run-Time client        (port 4176)
                                      erp-sim         ERP Simulator          (port 4174)
                                      equipment-sim   Equipment Simulator    (port 4175)
+                                    wip-client      WIP Client              (port 4177)
 
 OPTIONS
   --port       NUM   Override the Vite preview server port.
   --server-url URL   MES server to proxy API calls to (default: http://localhost:8082).
                      Sets MES_SERVER_URL env var read by vite.config.ts.
+  --tracking TYPE   Default WIP tracking type for the wip-client: lot | unit.
+                     Sets WIP_TRACKING env var read by vite.config.ts.
   --build            Force a fresh production build before serving.
   -h, --help         Show this help message.
 
@@ -55,6 +59,7 @@ EXAMPLES
   ./run-client-production.sh rt-client --server-url http://localhost:8083
   ./run-client-production.sh erp-sim --build
   ./run-client-production.sh equipment-sim
+  ./run-client-production.sh wip-client --tracking lot
 
 EOF
 }
@@ -94,6 +99,14 @@ while [[ $# -gt 0 ]]; do
         --build)
             DO_BUILD=1
             shift
+            ;;
+        --tracking)
+            if [[ -z "${2:-}" ]]; then
+                echo "Error: --tracking requires a value." >&2
+                exit 1
+            fi
+            TRACKING="$2"
+            shift 2
             ;;
         -*)
             echo "Error: Unknown option '$1'." >&2
@@ -137,6 +150,11 @@ case "$CLIENT_LOWER" in
         DEFAULT_PORT=4175
         LABEL="Equipment Simulator"
         ;;
+    wip-client)
+        CLIENT_DIR="$SCRIPT_DIR/clients/wip_client"
+        DEFAULT_PORT=4177
+        LABEL="WIP Client"
+        ;;
     "")
         echo "Error: Client argument is required." >&2
         show_help
@@ -144,7 +162,7 @@ case "$CLIENT_LOWER" in
         ;;
     *)
         echo "Error: Unknown client '$CLIENT'." >&2
-        echo "Valid options: dt-client, rt-client, erp-sim, equipment-sim" >&2
+        echo "Valid options: dt-client, rt-client, erp-sim, equipment-sim, wip-client" >&2
         exit 1
         ;;
 esac
@@ -154,6 +172,9 @@ if [[ "$PORT" -eq 0 ]]; then
     EFFECTIVE_PORT="$DEFAULT_PORT"
 fi
 EFFECTIVE_SERVER_URL="${SERVER_URL:-http://localhost:8082}"
+
+# Validate tracking type (wip-client program argument 1)
+TRACKING_LOWER="$(echo "$TRACKING" | tr 
 
 if [[ ! -d "$CLIENT_DIR" ]]; then
     echo "Error: Client directory not found: $CLIENT_DIR" >&2
@@ -218,6 +239,10 @@ echo "  Built         : $BUILD_TIMESTAMP"
 echo "  Serving from  : $CLIENT_DIR/dist"
 echo "  URL           : http://localhost:${EFFECTIVE_PORT}"
 echo "  MES Server    : $EFFECTIVE_SERVER_URL"
+if [[ "$CLIENT_LOWER" == "wip-client" ]]; then
+    TRACKING_LABEL="${TRACKING_LOWER:-(client default: unit)}"
+    echo "  Tracking      : $TRACKING_LABEL"
+fi
 echo ""
 
 # ---------------------------------------------------------------------------

@@ -326,6 +326,47 @@ class StepParameterUpdate(BaseModel):
     is_required: bool | None = None
 
 
+# ─── SegmentParameterValue (per-WIP recorded actuals) ────────────────
+
+
+class ParameterValueRecord(BaseModel):
+    """Record a single step-parameter actual value for a WIP unit/lot.
+
+    Recording is an upsert — the current row for this (parameter, unit/lot)
+    is updated in place rather than appended.
+    """
+
+    parameter_id: UUID
+    unit_id: UUID | None = Field(None, description="WIP unit this value belongs to")
+    lot_id: UUID | None = Field(None, description="WIP lot this value belongs to")
+    value_numeric: float | None = None
+    value_string: str | None = None
+    value_boolean: bool | None = None
+
+
+class ParameterValueBatchRequest(BaseModel):
+    """Record multiple step-parameter actual values in a single call."""
+
+    items: list[ParameterValueRecord] = Field(..., min_length=1, max_length=100)
+
+
+class ParameterValueRead(BaseModel):
+    """Schema for returning a recorded step-parameter value."""
+
+    id: UUID
+    parameter_id: UUID
+    unit_id: UUID | None = None
+    lot_id: UUID | None = None
+    value_numeric: float | None = None
+    value_string: str | None = None
+    value_boolean: bool | None = None
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 # ─── Route–Product Assignment ────────────────────────────────────────
 
 

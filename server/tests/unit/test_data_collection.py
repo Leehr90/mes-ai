@@ -354,6 +354,23 @@ class TestCollectRequestSchema:
         assert s.source_equipment_id is not None
         assert s.operator_id is not None
 
+    def test_upsert_defaults_false(self):
+        s = CollectRequest(
+            definition_id=uuid.uuid4(),
+            unit_id=uuid.uuid4(),
+            value_numeric=1.0,
+        )
+        assert s.upsert is False
+
+    def test_upsert_accepted(self):
+        s = CollectRequest(
+            definition_id=uuid.uuid4(),
+            unit_id=uuid.uuid4(),
+            value_numeric=1.0,
+            upsert=True,
+        )
+        assert s.upsert is True
+
 
 class TestCollectBatchRequestSchema:
     def test_single_item_batch(self):

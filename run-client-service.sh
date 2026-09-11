@@ -162,9 +162,14 @@ resolve_client() {
             DEFAULT_PORT=5175
             CLIENT_LABEL="Equipment Simulator"
             ;;
+        wip-client)
+            CLIENT_DIR="$SCRIPT_DIR/clients/wip_client"
+            DEFAULT_PORT=5177
+            CLIENT_LABEL="WIP Client"
+            ;;
         *)
             write_fatal "Unknown Client '$client_key'.
-Valid values: dt-client, rt-client, erp-sim, equipment-sim"
+Valid values: dt-client, rt-client, erp-sim, equipment-sim, wip-client"
             ;;
     esac
 }
@@ -359,6 +364,9 @@ SVC_DESC="$(cfg_value ServiceDescription "MES AI $CLIENT_LABEL Vite server")"
 PORT="$(cfg_value Port "$DEFAULT_PORT")"
 BIND_HOST="$(cfg_value BindHost   "0.0.0.0")"
 SERVER_URL="$(cfg_value ServerUrl  "http://localhost:8082")"
+TRACKING="$(cfg_value Tracking "")"
+TRACKING="$(echo "$TRACKING" | tr '[:upper:]' '[:lower:]')"
+case "$TRACKING" in ""|lot|unit) ;; *) write_fatal "Invalid Tracking '$TRACKING'. Valid values: lot, unit." ;; esac
 START_TYPE="$(cfg_value StartType  "auto")"
 LOG_DIR="$(cfg_value LogDir       "")"
 SVC_USER="$(cfg_value ServiceUser  "$(logname 2>/dev/null || echo "${SUDO_USER:-root}")")"
@@ -423,6 +431,7 @@ Group=$SVC_GROUP
 WorkingDirectory=$CLIENT_DIR
 
 Environment="MES_SERVER_URL=$SERVER_URL"
+Environment="WIP_TRACKING=$TRACKING"
 Environment="NO_COLOR=1"
 Environment="FORCE_COLOR=0"
 Environment="TERM=dumb"

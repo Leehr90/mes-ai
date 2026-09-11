@@ -17,6 +17,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 CLIENT=""
 PORT=0
 SERVER_URL=""
+TRACKING=""
 
 # ---------------------------------------------------------------------------
 # Help
@@ -33,11 +34,14 @@ ARGUMENTS
                                      rt-client       Run-Time client        (port 5176)
                                      erp-sim         ERP Simulator          (port 5174)
                                      equipment-sim   Equipment Simulator    (port 5175)
+                                    wip-client      WIP Client              (port 5177)
 
 OPTIONS
   --port       NUM   Override the Vite dev server port.
   --server-url URL   MES server to proxy API calls to (default: http://localhost:8082).
                      Sets MES_SERVER_URL env var read by vite.config.ts.
+    --wip      TYPE   Default WIP tracking type for the wip-client: lot | unit.
+                     Sets WIP_TRACKING env var read by vite.config.ts.
   -h, --help         Show this help message.
 
 EXAMPLES
@@ -46,6 +50,7 @@ EXAMPLES
   ./run-client.sh rt-client --server-url http://localhost:8083
   ./run-client.sh erp-sim
   ./run-client.sh equipment-sim --port 5200
+    ./run-client.sh wip-client --wip lot
 
 EOF
 }
@@ -80,6 +85,14 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             SERVER_URL="$2"
+            shift 2
+            ;;
+        --wip)
+            if [[ -z "${2:-}" ]]; then
+                echo "Error: --wip requires a value." >&2
+                exit 1
+            fi
+            TRACKING="$2"
             shift 2
             ;;
         -*)
@@ -124,6 +137,11 @@ case "$CLIENT_LOWER" in
         DEFAULT_PORT=5175
         LABEL="Equipment Simulator"
         ;;
+    wip-client)
+        CLIENT_DIR="$SCRIPT_DIR/clients/wip_client"
+        DEFAULT_PORT=5177
+        LABEL="WIP Client"
+        ;;
     "")
         echo "Error: Client argument is required." >&2
         show_help
@@ -131,7 +149,7 @@ case "$CLIENT_LOWER" in
         ;;
     *)
         echo "Error: Unknown client '$CLIENT'." >&2
-        echo "Valid options: dt-client, rt-client, erp-sim, equipment-sim" >&2
+        echo "Valid options: dt-client, rt-client, erp-sim, equipment-sim, wip-client" >&2
         exit 1
         ;;
 esac
@@ -154,10 +172,25 @@ echo "MES AI Client Startup"
 echo "====================="
 EFFECTIVE_SERVER_URL="${SERVER_URL:-http://localhost:8082}"
 export MES_SERVER_URL="$EFFECTIVE_SERVER_URL"
+
+# Validate tracking type (wip-client program argument 1)
+TRACKING_LOWER="$(echo "$TRACKING" | tr '[:upper:]' '[:lower:]')"
+case "$TRACKING_LOWER" in
+    ""|lot|unit) ;;
+    *)
+        echo "Error: Invalid tracking '$TRACKING'. Valid values: lot, unit." >&2
+        exit 1
+        ;;
+esac
+export WIP_TRACKING="$TRACKING_LOWER"
 echo "  Client     : $LABEL"
 echo "  Dir        : $CLIENT_DIR"
 echo "  URL        : http://localhost:${EFFECTIVE_PORT}"
 echo "  MES Server : $EFFECTIVE_SERVER_URL"
+if [[ "$CLIENT_LOWER" == "wip-client" ]]; then
+    TRACKING_LABEL="${TRACKING_LOWER:-(client default: unit)}"
+    echo "  Tracking   : $TRACKING_LABEL"
+fi
 echo ""
 
 # ---------------------------------------------------------------------------

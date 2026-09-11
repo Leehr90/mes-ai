@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Manage a MES AI Vite client application as a Windows service using NSSM.
 
@@ -64,6 +64,7 @@ $ClientMap = @{
     "rt-client"      = @{ Dir = "clients\run_time";           DefaultPort = 5176; Label = "Run-Time Client" }
     "erp-sim"        = @{ Dir = "clients\erp_simulator";      DefaultPort = 5174; Label = "ERP Simulator" }
     "equipment-sim"  = @{ Dir = "clients\equipment_simulator"; DefaultPort = 5175; Label = "Equipment Simulator" }
+    "wip-client"     = @{ Dir = "clients\wip_client";        DefaultPort = 5177; Label = "WIP Client" }
 }
 
 # ── Config parsing ────────────────────────────────────────────────────────────
@@ -209,7 +210,7 @@ function Resolve-ClientInfo {
     param([hashtable]$Cfg)
     $clientKey = (Get-CfgValue $Cfg "Client" "rt-client").ToLower()
     if (-not $ClientMap.ContainsKey($clientKey)) {
-        Write-Fatal "Unknown Client '$clientKey'.`nValid values: dt-client, rt-client, erp-sim, equipment-sim"
+        Write-Fatal "Unknown Client '$clientKey'.`nValid values: dt-client, rt-client, erp-sim, equipment-sim, wip-client"
     }
     return $ClientMap[$clientKey]
 }
@@ -378,6 +379,10 @@ $svcDesc    = Get-CfgValue $cfg "ServiceDescription" "MES AI $($info.Label) Vite
 $port       = Get-CfgValue $cfg "Port"               $info.DefaultPort.ToString()
 $bindHost   = Get-CfgValue $cfg "BindHost"           "0.0.0.0"
 $serverUrl  = Get-CfgValue $cfg "ServerUrl"          "http://localhost:8082"
+$tracking   = (Get-CfgValue $cfg "Tracking"          "").ToLower()
+if ($tracking -notin @("", "lot", "unit")) {
+    Write-Fatal "Invalid Tracking '$tracking' in config.  Valid values: lot, unit."
+}
 $startType  = Get-CfgValue $cfg "StartType"          "auto"
 $logDir     = Get-CfgValue $cfg "LogDir"             ""
 
@@ -402,6 +407,7 @@ Write-Host "  Service    : $svcName"
 Write-Host "  Display    : $svcDisplay"
 Write-Host "  URL        : http://${bindHost}:${port}"
 Write-Host "  MES Server : $serverUrl"
+if ($tracking -ne "") { Write-Host "  Tracking   : $tracking" }
 Write-Host "  Start Type : $startType"
 Write-Host "  Log Dir    : $logDir"
 Write-Host "  Node       : $nodeExe"
@@ -435,7 +441,11 @@ $viteArgs = "`"$wrapper`" `"$viteBin`" --host $bindHost --port $port"
 & $nssm set     $svcName Description    $svcDesc
 
 # Environment (NO_COLOR / FORCE_COLOR / TERM further discourage colour output)
-& $nssm set $svcName AppEnvironmentExtra "MES_SERVER_URL=$serverUrl`0NO_COLOR=1`0FORCE_COLOR=0`0TERM=dumb"
+$envExtra = "MES_SERVER_URL=$serverUrl`0NO_COLOR=1`0FORCE_COLOR=0`0TERM=dumb"
+if ($tracking -ne "") {
+    $envExtra = "MES_SERVER_URL=$serverUrl`0WIP_TRACKING=$tracking`0NO_COLOR=1`0FORCE_COLOR=0`0TERM=dumb"
+}
+& $nssm set $svcName AppEnvironmentExtra $envExtra
 
 # Logging
 & $nssm set $svcName AppStdout         (Join-Path $logDir "${svcName}-stdout.log")

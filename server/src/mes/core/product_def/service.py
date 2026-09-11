@@ -22,7 +22,11 @@ from mes.framework.api.pagination import PaginationParams, paginate_query
 from mes.framework.events import event_bus
 
 from .events import bom_created, product_created, route_created
-from .exceptions import DuplicateProductException, DuplicateDispositionCodeException
+from .exceptions import (
+    DuplicateProductException,
+    DuplicateDispositionCodeException,
+    InvalidParameterValueException,
+)
 from .models import (
     BillOfMaterial,
     BOMItem,
@@ -37,6 +41,7 @@ from .models import (
     SegmentEquipmentRequirement,
     SegmentMaterialRequirement,
     SegmentParameter,
+    SegmentParameterValue,
 )
 
 logger = logging.getLogger("mes.product_def")
@@ -732,6 +737,148 @@ class ProductDefService:
         param.is_active = False
         await session.flush()
         logger.info("Deleted step parameter %s", param_id)
+
+    # ─── SegmentParameterValue (per-WIP recorded actuals) ────────────
+
+    @staticmethod
+    def _validate_parameter_value(
+        param: SegmentParameter,
+        *,
+        value_numeric: float | None,
+        value_string: str | None,
+        value_boolean: bool | None,
+    ) -> None:
+        """Validate that the provided value matches the parameter's data_type."""
+        dt = param.data_type
+        if dt == "numeric":
+            if value_numeric is None:
+                raise InvalidParameterValueException(
+                    param.name, dt, "value_numeric is required for numeric type",
+                )
+        elif dt == "boolean":
+            if value_boolean is None:
+                raise InvalidParameterValueException(
+                    param.name, dt, "value_boolean is required for boolean type",
+                )
+        else:  # string / enum
+            if value_string is None:
+                raise InvalidParameterValueException(
+                    param.name, dt, "value_string is required for string/enum type",
+                )
+
+    @staticmethod
+    async def record_parameter_value(
+        session: AsyncSession,
+        *,
+        parameter_id: UUID,
+        unit_id: UUID | None = None,
+        lot_id: UUID | None = None,
+        value_numeric: float | None = None,
+        value_string: str | None = None,
+        value_boolean: bool | None = None,
+    ) -> SegmentParameterValue:
+        """
+        Record (upsert) a step-parameter actual value for a WIP unit/lot.
+
+        Keeps one current row per (parameter, unit/lot): an existing active
+        row is updated in place, otherwise a new one is created. Mirrors the
+        DATA-COLLECT upsert so the WIP client can re-save values.
+        """
+        param = await ProductDefService.get_step_parameter(session, parameter_id)
+        if unit_id is None and lot_id is None:
+            raise InvalidParameterValueException(
+                param.name, param.data_type,
+                "unit_id or lot_id is required",
+            )
+        ProductDefService._validate_parameter_value(
+            param,
+            value_numeric=value_numeric,
+            value_string=value_string,
+            value_boolean=value_boolean,
+        )
+
+        stmt = (
+            select(SegmentParameterValue)
+            .where(
+                SegmentParameterValue.parameter_id == parameter_id,
+                SegmentParameterValue.is_active.is_(True),
+            )
+            .order_by(SegmentParameterValue.created_at.desc())
+            .limit(1)
+        )
+        if unit_id is not None:
+            stmt = stmt.where(SegmentParameterValue.unit_id == unit_id)
+        else:
+            stmt = stmt.where(SegmentParameterValue.lot_id == lot_id)
+        existing = (await session.execute(stmt)).scalar_one_or_none()
+
+        if existing is not None:
+            existing.value_numeric = value_numeric
+            existing.value_string = value_string
+            existing.value_boolean = value_boolean
+            await session.flush()
+            logger.info(
+                "Updated parameter value %s for parameter %s (%s)",
+                existing.id, parameter_id, param.name,
+            )
+            return existing
+
+        value = SegmentParameterValue(
+            parameter_id=parameter_id,
+            unit_id=unit_id,
+            lot_id=lot_id,
+            value_numeric=value_numeric,
+            value_string=value_string,
+            value_boolean=value_boolean,
+        )
+        session.add(value)
+        await session.flush()
+        logger.info(
+            "Recorded parameter value %s for parameter %s (%s)",
+            value.id, parameter_id, param.name,
+        )
+        return value
+
+    @staticmethod
+    async def record_parameter_values_batch(
+        session: AsyncSession,
+        items: list[dict[str, Any]],
+    ) -> list[SegmentParameterValue]:
+        """Record multiple step-parameter actual values in a single call."""
+        values: list[SegmentParameterValue] = []
+        for item in items:
+            values.append(
+                await ProductDefService.record_parameter_value(
+                    session,
+                    parameter_id=item["parameter_id"],
+                    unit_id=item.get("unit_id"),
+                    lot_id=item.get("lot_id"),
+                    value_numeric=item.get("value_numeric"),
+                    value_string=item.get("value_string"),
+                    value_boolean=item.get("value_boolean"),
+                )
+            )
+        return values
+
+    @staticmethod
+    async def list_parameter_values(
+        session: AsyncSession,
+        params: PaginationParams,
+        parameter_id: UUID | None = None,
+        unit_id: UUID | None = None,
+        lot_id: UUID | None = None,
+    ) -> tuple[Sequence[SegmentParameterValue], str | None, bool]:
+        """Query recorded step-parameter values with optional filters."""
+        stmt = select(SegmentParameterValue).where(
+            SegmentParameterValue.is_active.is_(True),
+        )
+        if parameter_id is not None:
+            stmt = stmt.where(SegmentParameterValue.parameter_id == parameter_id)
+        if unit_id is not None:
+            stmt = stmt.where(SegmentParameterValue.unit_id == unit_id)
+        if lot_id is not None:
+            stmt = stmt.where(SegmentParameterValue.lot_id == lot_id)
+        return await paginate_query(session, stmt, SegmentParameterValue, params)
 
     # ─── ERP Routing Sync ────────────────────────────────────────────
 

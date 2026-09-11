@@ -361,8 +361,72 @@ class SegmentParameter(BaseModel):
     def uom_symbol(self) -> str | None:
         return self.uom_rel.symbol if self.uom_rel else None
 
+    # Relationship to the recorded per-WIP actual values for this parameter.
+    parameter_values: Mapped[list["SegmentParameterValue"]] = relationship(
+        "SegmentParameterValue", back_populates="parameter",
+        cascade="all, delete-orphan",
+    )
+
     def __repr__(self) -> str:
         return f"<SegmentParameter id={self.id} step_id={self.step_id} name={self.name}>"
+
+
+class SegmentParameterValue(BaseModel):
+    """
+    An actual recorded value for a SegmentParameter on a specific WIP unit
+    or lot — the step-parameter analogue of DataPoint in DATA-COLLECT.
+
+    The value is stored in the column matching the parameter's data_type:
+    - numeric  → value_numeric
+    - string   → value_string
+    - boolean  → value_boolean
+    - enum     → value_string
+
+    Recording is an upsert: the service keeps one current row per
+    (parameter, unit/lot), so re-saving a value updates it in place.
+    """
+
+    __tablename__ = "segment_parameter_values"
+
+    parameter_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("segment_parameters.id"),
+        nullable=False, index=True,
+        comment="SegmentParameter (spec) this actual value belongs to",
+    )
+    unit_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("units.id"),
+        nullable=True, index=True,
+        comment="WIP unit this value was recorded for (null if lot-based)",
+    )
+    lot_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("lots.id"),
+        nullable=True, index=True,
+        comment="WIP lot this value was recorded for (null if unit-based)",
+    )
+    value_numeric: Mapped[float | None] = mapped_column(
+        Float, nullable=True,
+        comment="Recorded value when data_type='numeric'",
+    )
+    value_string: Mapped[str | None] = mapped_column(
+        Text, nullable=True,
+        comment="Recorded value when data_type='string' or 'enum'",
+    )
+    value_boolean: Mapped[bool | None] = mapped_column(
+        Boolean, nullable=True,
+        comment="Recorded value when data_type='boolean'",
+    )
+
+    # Relationships
+    parameter: Mapped["SegmentParameter"] = relationship(
+        "SegmentParameter", back_populates="parameter_values",
+    )
+
+    def __repr__(self) -> str:
+        val = self.value_numeric or self.value_string or self.value_boolean
+        return (
+            f"<SegmentParameterValue id={self.id} param={self.parameter_id} "
+            f"value={val}>"
+        )
 
 
 class SegmentEquipmentRequirement(BaseModel):

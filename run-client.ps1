@@ -13,6 +13,7 @@
       rt-client        Run-Time client             (default port 5176)
       erp-sim          ERP Simulator               (default port 5174)
       equipment-sim    Equipment Simulator         (default port 5175)
+      wip-client       WIP Client                  (default port 5177)
 
 .PARAMETER Port
     Optional. Override the Vite dev server port.
@@ -21,6 +22,12 @@
     Optional. URL of the MES server to proxy API calls to.
     Defaults to http://localhost:8082.
     Sets the MES_SERVER_URL environment variable read by vite.config.ts.
+
+.PARAMETER WIP
+    Optional. Default WIP tracking type for the wip-client: lot | unit.
+    Sets the WIP_TRACKING environment variable read by vite.config.ts
+    (injected as __WIP_TRACKING__; a ?tracking= query parameter overrides
+    it at runtime). Ignored by clients other than wip-client.
 
 .PARAMETER Help
     Show this help message.
@@ -31,6 +38,7 @@
     .\run-client.ps1 rt-client -ServerUrl http://localhost:8083
     .\run-client.ps1 erp-sim
     .\run-client.ps1 equipment-sim -Port 5200
+    .\run-client.ps1 wip-client -WIP lot
     .\run-client.ps1 -Help
 #>
 
@@ -44,6 +52,9 @@ param(
 
     [Parameter()]
     [string]$ServerUrl = "",
+
+    [Parameter()]
+    [string]$WIP = "",
 
     [Parameter()]
     [switch]$Help
@@ -67,11 +78,14 @@ ARGUMENTS
                                      rt-client       Run-Time client        (port 5176)
                                      erp-sim         ERP Simulator          (port 5174)
                                      equipment-sim   Equipment Simulator    (port 5175)
+                                    wip-client      WIP Client              (port 5177)
 
 OPTIONS
   -Port       NUM   Override the Vite dev server port.
   -ServerUrl  URL   MES server to proxy API calls to (default: http://localhost:8082).
                     Sets MES_SERVER_URL env var read by vite.config.ts.
+    -WIP        TYPE  Default WIP tracking type for the wip-client: lot | unit.
+                    Sets WIP_TRACKING env var read by vite.config.ts.
   -Help             Show this help message.
 
 EXAMPLES
@@ -80,6 +94,7 @@ EXAMPLES
   .\run-client.ps1 rt-client -ServerUrl http://localhost:8083
   .\run-client.ps1 erp-sim
   .\run-client.ps1 equipment-sim -Port 5200
+    .\run-client.ps1 wip-client -WIP lot
 
 "@
 }
@@ -97,11 +112,12 @@ $clientMap = @{
     "rt-client"      = @{ Dir = "clients\run_time";          DefaultPort = 5176; Label = "Run-Time Client" }
     "erp-sim"        = @{ Dir = "clients\erp_simulator";     DefaultPort = 5174; Label = "ERP Simulator" }
     "equipment-sim"  = @{ Dir = "clients\equipment_simulator"; DefaultPort = 5175; Label = "Equipment Simulator" }
+    "wip-client"     = @{ Dir = "clients\wip_client";        DefaultPort = 5177; Label = "WIP Client" }
 }
 
 $key = $Client.ToLower()
 if (-not $clientMap.ContainsKey($key)) {
-    Write-Error "Unknown client '$Client'.`nValid options: dt-client, rt-client, erp-sim, equipment-sim`nRun .\run-client.ps1 -Help for usage."
+    Write-Error "Unknown client '$Client'.`nValid options: dt-client, rt-client, erp-sim, equipment-sim, wip-client`nRun .\run-client.ps1 -Help for usage."
     exit 1
 }
 
@@ -109,6 +125,13 @@ $info        = $clientMap[$key]
 $scriptRoot  = $PSScriptRoot
 $clientDir   = Join-Path $scriptRoot $info.Dir
 $effectivePort = if ($Port -gt 0) { $Port } else { $info.DefaultPort }
+
+# Validate tracking type (wip-client program argument 1)
+$effectiveTracking = $WIP.ToLower()
+if ($effectiveTracking -notin @("", "lot", "unit")) {
+    Write-Error "Invalid -WIP '$WIP'. Valid values: lot, unit (or empty for the client default)."
+    exit 1
+}
 
 if (-not (Test-Path $clientDir)) {
     Write-Error "Client directory not found: $clientDir"
@@ -126,6 +149,10 @@ Write-Host "  Client     : $($info.Label)"
 Write-Host "  Dir        : $clientDir"
 Write-Host "  URL        : http://localhost:${effectivePort}"
 Write-Host "  MES Server : $effectiveServerUrl"
+if ($key -eq "wip-client") {
+    $trackingLabel = if ($effectiveTracking -ne "") { $effectiveTracking } else { "(client default: unit)" }
+    Write-Host "  Tracking   : $trackingLabel"
+}
 Write-Host ""
 
 # ---------------------------------------------------------------------------
@@ -154,6 +181,7 @@ Write-Host "Press Ctrl+C to stop."
 Write-Host ""
 
 $env:MES_SERVER_URL = $effectiveServerUrl
+$env:WIP_TRACKING = $effectiveTracking
 Push-Location $clientDir
 try {
     if ($Port -gt 0) {
